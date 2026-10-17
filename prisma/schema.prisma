@@ -1,0 +1,238 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String             @id @default(uuid())
+  email        String             @unique
+  passwordHash String
+  fullName     String
+  role         String             // "CLIENT" | "FREELANCER" | "ADMIN"
+  status       String             @default("ACTIVE") // "ACTIVE" | "SUSPENDED"
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  clientProfile     ClientProfile?
+  freelancerProfile FreelancerProfile?
+  jobs              Job[]             @relation("ClientJobs")
+  proposals         Proposal[]        @relation("FreelancerProposals")
+  clientContracts   Contract[]        @relation("ClientContracts")
+  freelancerContracts Contract[]      @relation("FreelancerContracts")
+  submissions       WorkSubmission[]  @relation("FreelancerSubmissions")
+  reviewsGiven      Review[]          @relation("ReviewsGiven")
+  reviewsReceived   Review[]          @relation("ReviewsReceived")
+  ledgerAccounts    LedgerAccount[]
+  disputesInitiated Dispute[]         @relation("DisputesInitiated")
+  auditEvents       AuditEvent[]
+  notifications     Notification[]
+}
+
+model ClientProfile {
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companyName     String?
+  website         String?
+  description     String?
+  totalSpentMinor Int      @default(0) // Integer cents
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model FreelancerProfile {
+  id               String   @id @default(uuid())
+  userId           String   @unique
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  headline         String?
+  bio              String?
+  hourlyRateMinor  Int      @default(0) // Integer cents
+  skills           String   @default("[]") // JSON string array of skills
+  totalEarnedMinor Int      @default(0) // Integer cents
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model Job {
+  id             String     @id @default(uuid())
+  clientId       String
+  client         User       @relation("ClientJobs", fields: [clientId], references: [id], onDelete: Cascade)
+  title          String
+  description    String
+  budgetMinor    Int        // Integer cents
+  category       String
+  status         String     @default("OPEN") // "OPEN" | "IN_SELECTION" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED"
+  skillsRequired String     @default("[]") // JSON string array
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  proposals      Proposal[]
+  contracts      Contract[]
+}
+
+model Proposal {
+  id             String    @id @default(uuid())
+  jobId          String
+  job            Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  freelancerId   String
+  freelancer     User      @relation("FreelancerProposals", fields: [freelancerId], references: [id], onDelete: Cascade)
+  bidAmountMinor Int       // Integer cents
+  coverLetter    String
+  estimatedDays  Int
+  status         String    @default("PENDING") // "PENDING" | "ACCEPTED" | "REJECTED" | "WITHDRAWN"
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  contract       Contract?
+}
+
+model Contract {
+  id               String           @id @default(uuid())
+  jobId            String
+  job              Job              @relation(fields: [jobId], references: [id])
+  clientId         String
+  client           User             @relation("ClientContracts", fields: [clientId], references: [id])
+  freelancerId     String
+  freelancer       User             @relation("FreelancerContracts", fields: [freelancerId], references: [id])
+  proposalId       String?          @unique
+  proposal         Proposal?        @relation(fields: [proposalId], references: [id])
+  title            String
+  totalAmountMinor Int              // Integer cents
+  feeBps           Int              @default(1000) // Basis points (1000 = 10.00%)
+  status           String           @default("CREATED") // "CREATED" | "FUNDED_SIMULATED" | "IN_PROGRESS" | "SUBMITTED" | "APPROVED" | "RELEASED_SIMULATED" | "DISPUTED" | "REFUNDED_SIMULATED" | "CANCELLED"
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  milestones       Milestone[]
+  escrowRecord     EscrowRecord?
+  submissions      WorkSubmission[]
+  dispute          Dispute?
+  ledgerEntries    LedgerEntry[]
+  reviews          Review[]
+}
+
+model Milestone {
+  id               String        @id @default(uuid())
+  contractId       String
+  contract         Contract      @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  title            String
+  description      String
+  amountMinor      Int           // Integer cents
+  feeBps           Int           @default(1000) // Basis points (1000 = 10.00%)
+  orderIndex       Int           @default(0)
+  status           String        @default("PENDING") // "PENDING" | "FUNDED_SIMULATED" | "SUBMITTED" | "APPROVED" | "RELEASED_SIMULATED" | "DISPUTED" | "REFUNDED_SIMULATED"
+  dueDate          DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  submissions      WorkSubmission[]
+  escrowRecords    EscrowRecord[]
+}
+
+model WorkSubmission {
+  id             String     @id @default(uuid())
+  contractId     String
+  contract       Contract   @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  milestoneId    String?
+  milestone      Milestone? @relation(fields: [milestoneId], references: [id], onDelete: SetNull)
+  freelancerId   String
+  freelancer     User       @relation("FreelancerSubmissions", fields: [freelancerId], references: [id])
+  notes          String
+  attachmentUrls String     @default("[]") // JSON string array
+  status         String     @default("SUBMITTED") // "SUBMITTED" | "ACCEPTED" | "REJECTED"
+  submittedAt    DateTime   @default(now())
+}
+
+model Review {
+  id         String   @id @default(uuid())
+  contractId String
+  contract   Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  authorId   String
+  author     User     @relation("ReviewsGiven", fields: [authorId], references: [id])
+  targetId   String
+  target     User     @relation("ReviewsReceived", fields: [targetId], references: [id])
+  rating     Int      // 1 to 5
+  feedback   String
+  createdAt  DateTime @default(now())
+}
+
+model EscrowRecord {
+  id          String     @id @default(uuid())
+  contractId  String     @unique
+  contract    Contract   @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  milestoneId String?
+  milestone   Milestone? @relation(fields: [milestoneId], references: [id])
+  amountMinor Int        // Integer cents
+  status      String     @default("HOLDING") // "HOLDING" | "RELEASED" | "REFUNDED"
+  fundedAt    DateTime   @default(now())
+  releasedAt  DateTime?
+  refundedAt  DateTime?
+}
+
+model LedgerAccount {
+  id           String        @id @default(uuid())
+  userId       String?
+  user         User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountType  String        // "CLIENT_AVAILABLE" | "CLIENT_ESCROW_LOCKED" | "FREELANCER_AVAILABLE" | "PLATFORM_ESCROW_HOLDING" | "PLATFORM_FEE_REVENUE"
+  balanceMinor Int           @default(0) // Integer cents
+  updatedAt    DateTime      @updatedAt
+
+  debitEntries  LedgerEntry[] @relation("DebitAccount")
+  creditEntries LedgerEntry[] @relation("CreditAccount")
+
+  @@unique([userId, accountType])
+}
+
+model LedgerEntry {
+  id              String        @id @default(uuid())
+  contractId      String?
+  contract        Contract?     @relation(fields: [contractId], references: [id])
+  debitAccountId  String
+  debitAccount    LedgerAccount @relation("DebitAccount", fields: [debitAccountId], references: [id])
+  creditAccountId String
+  creditAccount   LedgerAccount @relation("CreditAccount", fields: [creditAccountId], references: [id])
+  amountMinor     Int           // Integer cents
+  referenceType   String        // "SIMULATED_DEPOSIT" | "ESCROW_LOCK" | "ESCROW_RELEASE" | "ESCROW_REFUND" | "PLATFORM_FEE"
+  description     String
+  createdAt       DateTime      @default(now())
+}
+
+model Dispute {
+  id              String    @id @default(uuid())
+  contractId      String    @unique
+  contract        Contract  @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  initiatorId     String
+  initiator       User      @relation("DisputesInitiated", fields: [initiatorId], references: [id])
+  reason          String
+  status          String    @default("OPEN") // "OPEN" | "RESOLVED_RELEASE" | "RESOLVED_REFUND"
+  resolutionNotes String?
+  resolvedById    String?
+  createdAt       DateTime  @default(now())
+  resolvedAt      DateTime?
+}
+
+model AuditEvent {
+  id         String   @id @default(uuid())
+  actorId    String?
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  action     String   // e.g. "ESCROW_FUNDED_SIMULATED", "WORK_SUBMITTED", "ESCROW_RELEASED_SIMULATED"
+  entityType String   // "CONTRACT", "JOB", "USER", "PROPOSAL", "DISPUTE"
+  entityId   String
+  payload    String?  // JSON formatted details
+  createdAt  DateTime @default(now())
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  link      String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
